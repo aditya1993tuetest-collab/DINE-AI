@@ -1,0 +1,10 @@
+case_id,url,address,name,online_order,book_table,rate,votes,location,rest_type,dish_liked,cuisines,approx_cost(for two people),listed_in(type),listed_in(city)
+valid-001,https://example.test/bangalore/green-table-indiranagar,"1 Main Road, Indiranagar, Bangalore",Green Table,Yes,Yes,4.3/5,500,Indiranagar,Casual Dining,"Pasta, Soup","Italian, Continental","1,200",Dine-out,Indiranagar
+valid-002,https://example.test/bangalore/spice-route-indiranagar,"2 Main Road, Indiranagar, Bangalore",Spice Route,Yes,No,4.0/5,15,Indiranagar,Quick Bites,,"North Indian, Chinese",600,Delivery,Indiranagar
+boundary-001,https://example.test/bangalore/cafe-boundary-koramangala,"3 Cross, Koramangala, Bangalore",Cafe Boundary,No,No,5.0/5,1,Koramangala,Cafe,Coffee,"Cafe, Italian",800,Cafes,Koramangala
+missing-001,https://example.test/bangalore/unknown-cost-jayanagar,"4 Block, Jayanagar, Bangalore",Unknown Cost,No,No,NEW,0,Jayanagar,Quick Bites,,South Indian,,Delivery,Jayanagar
+duplicate-001,https://example.test/bangalore/green-table-indiranagar,"1 Main Road, Indiranagar, Bangalore",Green Table,Yes,Yes,4.3/5,500,Indiranagar,Casual Dining,"Pasta, Soup","Italian, Continental","1,200",Delivery,Indiranagar
+unsafe-001,https://example.test/bangalore/script-cafe,"5 Road, Bangalore","<script>alert('x')</script>",Yes,No,3.9/5,20,Banashankari,Cafe,,Cafe,500,Cafes,Banashankari
+malformed-001,https://example.test/bangalore/broken-record,"6 Road, Bangalore",Broken Rating,Maybe,Unknown,not-rated,-2,Banashankari,Cafe,,"Cafe; Desserts",-100,Cafes,Banashankari
+unicode-001,https://example.test/bangalore/cafe-unicode,"7 Road, Bangalore",Cafe Unicode,Yes,No,4.1/5,42,Banashankari,Cafe,,"Cafe, Desserts",550,Cafes,Banashankari
+

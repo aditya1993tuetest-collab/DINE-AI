@@ -1,0 +1,42 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+.phase0-python/
+.phase1-python/
+.phase5-python/
+.pytest-tmp-*/
+.tmp-pip/
+dist/
+build/
+*.egg-info/
+
+# Node
+node_modules/
+apps/web/dist/
+apps/web/coverage/
+apps/web/.npm-cache/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local data and runtime files
+.cache/
+.runtime/
+data/raw/
+*.log
+
+/apps/web/test-results/

@@ -1,0 +1,24 @@
+groups:
+  - name: nextleap
+    rules:
+      - alert: NextLeapAvailabilityLow
+        expr: sum(rate(nextleap_http_requests_total{status=~"2.."}[5m])) / sum(rate(nextleap_http_requests_total[5m])) < 0.99
+        for: 10m
+        labels: {severity: page}
+        annotations: {runbook: docs/runbooks/incident-response.md#availability}
+      - alert: NextLeapLatencyHigh
+        expr: rate(nextleap_http_request_duration_seconds_sum{route_group="recommendation"}[5m]) / rate(nextleap_http_request_duration_seconds_count{route_group="recommendation"}[5m]) > 2
+        for: 15m
+        labels: {severity: ticket}
+      - alert: NextLeapFallbackRateHigh
+        expr: sum(rate(nextleap_recommendation_outcomes_total{mode="fallback"}[15m])) / sum(rate(nextleap_recommendation_outcomes_total[15m])) > 0.20
+        for: 15m
+        labels: {severity: ticket}
+      - alert: NextLeapCacheHitRateLow
+        expr: sum(rate(nextleap_cache_requests_total{result="hit",cache="recommendation"}[30m])) / sum(rate(nextleap_cache_requests_total{cache="recommendation"}[30m])) < 0.20
+        for: 30m
+        labels: {severity: info}
+      - alert: NextLeapRateLimitSpike
+        expr: sum(rate(nextleap_rate_limit_rejections_total[5m])) > 5
+        for: 10m
+        labels: {severity: ticket}

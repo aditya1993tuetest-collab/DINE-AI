@@ -1,0 +1,6 @@
+PS C:\Users\Aditya Agarwal> docker compose -f "C:\Users\Aditya Agarwal\Desktop\NextLeap\compose.yaml" ps
+NAME                  IMAGE                                                                     COMMAND                  SERVICE    CREATED         STATUS                     PORTS
+nextleap-api-1        sha256:422235b09a0f8f7c78d38db3ac588c4cefb1ba3d957350d8cccaa680f3e5652a   "uvicorn restaurant_…"   api        7 minutes ago   Up 7 minutes (unhealthy)   0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp
+nextleap-postgres-1   postgres:17-alpine                                                        "docker-entrypoint.s…"   postgres   7 minutes ago   Up 7 minutes (healthy)     0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp
+nextleap-redis-1      redis:7-alpine                                                            "docker-entrypoint.s…"   redis      7 minutes ago   Up 7 minutes (healthy)     0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp
+nextleap-web-1        sha256:aee4249088b517a5ce882a56b1aa64d1291eb3103b6d3635f9d520d270a86365   "/docker-entrypoint.…"   web        7 minutes ago   Up 7 minutes (healthy)     0.0.0.0:5173->5173/tcp, [::]:5173->5173/tcp

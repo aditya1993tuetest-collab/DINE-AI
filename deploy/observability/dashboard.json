@@ -1,0 +1,12 @@
+{
+  "title": "NextLeap production overview",
+  "schemaVersion": 39,
+  "panels": [
+    {"title": "Traffic by status", "type": "timeseries", "targets": [{"expr": "sum by (status) (rate(nextleap_http_requests_total[5m]))"}]},
+    {"title": "Mean recommendation latency", "type": "timeseries", "targets": [{"expr": "rate(nextleap_http_request_duration_seconds_sum{route_group=\"recommendation\"}[5m]) / rate(nextleap_http_request_duration_seconds_count{route_group=\"recommendation\"}[5m])"}]},
+    {"title": "Outcome and fallback rate", "type": "timeseries", "targets": [{"expr": "sum by (mode,outcome) (rate(nextleap_recommendation_outcomes_total[5m]))"}]},
+    {"title": "Cache hit/miss", "type": "timeseries", "targets": [{"expr": "sum by (cache,result) (rate(nextleap_cache_requests_total[5m]))"}]},
+    {"title": "Avoided provider calls", "type": "stat", "targets": [{"expr": "sum(increase(nextleap_provider_calls_avoided_total[24h]))"}]},
+    {"title": "Rate-limit rejections", "type": "timeseries", "targets": [{"expr": "sum by (route_group) (rate(nextleap_rate_limit_rejections_total[5m]))"}]}
+  ]
+}
