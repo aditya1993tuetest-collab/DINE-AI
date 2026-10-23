@@ -10,6 +10,7 @@ from typing import Any
 
 from restaurant_recommender.config import get_settings
 from restaurant_recommender.ingestion.adapters import FixtureAdapter, HuggingFaceCsvAdapter
+from restaurant_recommender.ingestion.capacity import check_postgres_capacity
 from restaurant_recommender.ingestion.contracts import DatasetAdapter
 from restaurant_recommender.ingestion.quality import QualityGates
 from restaurant_recommender.ingestion.service import IngestionService
@@ -28,6 +29,14 @@ def _parser() -> argparse.ArgumentParser:
     ingest.add_argument("--filename", default="zomato.csv")
     ingest.add_argument("--expected-sha256")
     ingest.add_argument("--dry-run", action="store_true")
+    capacity = commands.add_parser("capacity", help="check PostgreSQL capacity before publishing")
+    capacity.add_argument("--dataset", required=True)
+    capacity.add_argument("--revision", required=True)
+    capacity.add_argument("--content-hash", required=True)
+    capacity.add_argument("--accepted-rows", required=True, type=int)
+    capacity.add_argument("--database-limit-bytes", required=True, type=int)
+    capacity.add_argument("--reserve-bytes", required=True, type=int)
+    capacity.add_argument("--estimated-bytes-per-record", required=True, type=int)
     commands.add_parser("list", help="list dataset versions")
     inspect = commands.add_parser("inspect", help="inspect a dataset version")
     inspect.add_argument("version_id", type=uuid.UUID)
@@ -56,6 +65,21 @@ def main() -> None:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(message)s")
     engine = build_engine(settings.database_url)
+    if args.command == "capacity":
+        report = check_postgres_capacity(
+            engine,
+            source_name=args.dataset,
+            source_revision=args.revision,
+            content_hash=args.content_hash,
+            accepted_rows=args.accepted_rows,
+            database_limit_bytes=args.database_limit_bytes,
+            reserve_bytes=args.reserve_bytes,
+            estimated_bytes_per_record=args.estimated_bytes_per_record,
+        )
+        print(json.dumps(report.to_dict(), indent=2))
+        if not report.safe_to_publish:
+            raise SystemExit(3)
+        return
     if args.command == "ingest":
         if args.fixture:
             adapter: DatasetAdapter = FixtureAdapter(

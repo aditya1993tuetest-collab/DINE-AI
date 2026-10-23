@@ -102,7 +102,28 @@ Render free services do not provide shell/one-off jobs, and free pre-deploy comm
 
 ## 5. Load the pinned dataset
 
-In Render, open `nextleap-postgres > Info` and copy the **external** database URL. Treat it as a secret. In the same PowerShell window where the API package is installed:
+Add the Render PostgreSQL **external** URL as the GitHub Actions repository secret
+`RENDER_DATABASE_URL`. The manual-only `.github/workflows/ingest-zomato.yml` workflow uses Python
+3.12, forces PostgreSQL TLS through `PGSSLMODE=require`, and never prints the URL.
+
+Run **Ingest pinned Zomato dataset** from the Actions tab with `operation: validate` first. This
+downloads the immutable source to runner-local temporary storage, verifies its SHA-256, runs the
+existing `--dry-run` pipeline, reports accepted/rejected/duplicate counts and quality gates, and
+performs a read-only database-capacity check. It does not publish records.
+
+Review that run's summary. Only after the quality report and capacity projection pass, explicitly
+run the workflow again with `operation: publish`. The publish run repeats validation before using
+the existing idempotent, transactional publisher. It then confirms the sole active PostgreSQL
+version, live readiness, non-empty location/cuisine responses, and the deployed frontend CORS
+origin. The workflow is never triggered by a push or pull request.
+
+The capacity guard assumes the 1,000,000,000-byte free-database limit, budgets a conservative
+12,288 bytes per accepted canonical restaurant (including related cuisines and indexes), and
+retains 100,000,000 bytes of headroom. An identical existing dataset version adds no projected
+storage because publication is idempotent.
+
+For emergency operator use outside GitHub Actions, open `nextleap-postgres > Info`, copy the
+**external** database URL, treat it as a secret, and run:
 
 ```powershell
 $env:DATABASE_URL = '<paste-render-external-database-url>'
@@ -115,13 +136,23 @@ nextleap-data ingest `
   --dataset ManikaSaini/zomato-restaurant-recommendation `
   --revision 5738e9eda2fad49ad51c6e0ed26e761d9b947133 `
   --filename zomato.csv `
+  --expected-sha256 4b0c91c37585310d509873dc399fdf739c7d222fcf7a693e4461b23d25a9d43d `
+  --dry-run
+
+# Publish only after reviewing the dry-run result and database capacity.
+nextleap-data ingest `
+  --dataset ManikaSaini/zomato-restaurant-recommendation `
+  --revision 5738e9eda2fad49ad51c6e0ed26e761d9b947133 `
+  --filename zomato.csv `
   --expected-sha256 4b0c91c37585310d509873dc399fdf739c7d222fcf7a693e4461b23d25a9d43d
 
 nextleap-data list
 Remove-Item Env:DATABASE_URL
 ```
 
-The ingestion must end with status `active`. Exit code 2 means a quality gate failed; do not bypass the gate. The source is downloaded once for this operator action, not by API requests or restarts.
+The publication must end with status `active`. Exit code 2 means a quality gate failed; do not
+bypass the gate. The source is downloaded only for explicit operator actions, not by API requests,
+builds, deploys, or restarts.
 
 Check Render's database storage graph after ingestion. The free database is limited to 1 GB. If the canonical dataset and indexes do not fit, stop and select a larger database—do not weaken validation or store data on the API's ephemeral filesystem.
 

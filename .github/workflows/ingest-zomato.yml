@@ -1,0 +1,255 @@
+name: Ingest pinned Zomato dataset
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Validate only, or validate then publish and activate
+        required: true
+        default: validate
+        type: choice
+        options:
+          - validate
+          - publish
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-zomato-ingestion
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    name: Validate and optionally publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DATABASE_URL: ${{ secrets.RENDER_DATABASE_URL }}
+      PGSSLMODE: require
+      DATASET_NAME: ManikaSaini/zomato-restaurant-recommendation
+      DATASET_REVISION: 5738e9eda2fad49ad51c6e0ed26e761d9b947133
+      DATASET_FILENAME: zomato.csv
+      SOURCE_SHA256: 4b0c91c37585310d509873dc399fdf739c7d222fcf7a693e4461b23d25a9d43d
+      DATABASE_LIMIT_BYTES: "1000000000"
+      DATABASE_RESERVE_BYTES: "100000000"
+      ESTIMATED_BYTES_PER_RECORD: "12288"
+      API_BASE_URL: https://nextleap-api-4m0t.onrender.com
+      WEB_ORIGIN: https://nextleap-web.onrender.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require a Render PostgreSQL secret
+        shell: bash
+        run: |
+          if [[ -z "${DATABASE_URL:-}" ]]; then
+            echo "RENDER_DATABASE_URL is not configured." >&2
+            exit 1
+          fi
+          case "$DATABASE_URL" in
+            postgres://*|postgresql://*|postgresql+psycopg://*) ;;
+            *)
+              echo "RENDER_DATABASE_URL is not a PostgreSQL URL." >&2
+              exit 1
+              ;;
+          esac
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/api/pyproject.toml
+
+      - name: Install the existing ingestion CLI
+        run: python -m pip install ./apps/api
+
+      - name: Validate pinned source with the dry-run pipeline
+        id: dry_run
+        shell: bash
+        run: |
+          nextleap-data ingest \
+            --dataset "$DATASET_NAME" \
+            --revision "$DATASET_REVISION" \
+            --filename "$DATASET_FILENAME" \
+            --expected-sha256 "$SOURCE_SHA256" \
+            --dry-run | tee "$RUNNER_TEMP/zomato-quality-report.json"
+
+      - name: Report quality-gate results
+        id: quality
+        shell: bash
+        run: |
+          python - "$RUNNER_TEMP/zomato-quality-report.json" <<'PY'
+          import json
+          import os
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              payload = json.load(handle)
+          report = payload["quality_report"]
+          if payload["status"] != "validated" or report["gate_failures"]:
+              raise SystemExit("dry-run quality gates did not pass")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"accepted_rows={report['accepted_rows']}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## Zomato dry-run quality report\n\n")
+              summary.write(f"- Source rows: {report['source_rows']}\n")
+              summary.write(f"- Accepted rows: {report['accepted_rows']}\n")
+              summary.write(f"- Rejected rows: {report['rejected_rows']}\n")
+              summary.write(f"- Duplicate rows: {report['duplicate_rows']}\n")
+              summary.write(f"- Gate failures: {report['gate_failures']}\n")
+          PY
+
+      - name: Check Render Free PostgreSQL capacity
+        shell: bash
+        run: |
+          nextleap-data capacity \
+            --dataset "$DATASET_NAME" \
+            --revision "$DATASET_REVISION" \
+            --content-hash "$SOURCE_SHA256" \
+            --accepted-rows "${{ steps.quality.outputs.accepted_rows }}" \
+            --database-limit-bytes "$DATABASE_LIMIT_BYTES" \
+            --reserve-bytes "$DATABASE_RESERVE_BYTES" \
+            --estimated-bytes-per-record "$ESTIMATED_BYTES_PER_RECORD" \
+            | tee "$RUNNER_TEMP/zomato-capacity-report.json"
+
+      - name: Add capacity result to summary
+        shell: bash
+        run: |
+          python - "$RUNNER_TEMP/zomato-capacity-report.json" <<'PY'
+          import json
+          import os
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              report = json.load(handle)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("\n## PostgreSQL capacity guard\n\n")
+              summary.write(f"- Current size: {report['database_size_bytes']} bytes\n")
+              summary.write(
+                  f"- Estimated additional size: {report['estimated_additional_bytes']} bytes\n"
+              )
+              summary.write(f"- Projected size: {report['projected_size_bytes']} bytes\n")
+              summary.write(
+                  f"- Remaining after projection: "
+                  f"{report['remaining_after_projection_bytes']} bytes\n"
+              )
+              summary.write(f"- Reserved headroom: {report['reserve_bytes']} bytes\n")
+              summary.write(
+                  f"- Existing identical version: {report['existing_dataset_version']}\n"
+              )
+          PY
+
+      - name: Stop after validation
+        if: inputs.operation == 'validate'
+        run: echo "Validation completed; no database records were changed."
+
+      - name: Publish and atomically activate the pinned dataset
+        if: inputs.operation == 'publish'
+        shell: bash
+        run: |
+          nextleap-data ingest \
+            --dataset "$DATASET_NAME" \
+            --revision "$DATASET_REVISION" \
+            --filename "$DATASET_FILENAME" \
+            --expected-sha256 "$SOURCE_SHA256" \
+            | tee "$RUNNER_TEMP/zomato-publication-report.json"
+
+      - name: Verify the active version in PostgreSQL
+        if: inputs.operation == 'publish'
+        shell: bash
+        run: |
+          nextleap-data list > "$RUNNER_TEMP/zomato-versions.json"
+          python - "$RUNNER_TEMP/zomato-versions.json" <<'PY'
+          import json
+          import os
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              versions = json.load(handle)
+          active = [version for version in versions if version["status"] == "active"]
+          expected = [
+              version
+              for version in active
+              if version["source_name"] == os.environ["DATASET_NAME"]
+              and version["revision"] == os.environ["DATASET_REVISION"]
+              and version["content_hash"] == os.environ["SOURCE_SHA256"]
+          ]
+          if len(active) != 1 or len(expected) != 1:
+              raise SystemExit("the pinned Zomato version is not the sole active dataset")
+          version = expected[0]
+          if version["record_count"] <= 0 or version["quality_report"]["gate_failures"]:
+              raise SystemExit("the active dataset failed post-publication verification")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("\n## Active PostgreSQL dataset\n\n")
+              summary.write(f"- Version: `{version['id']}`\n")
+              summary.write(f"- Records: {version['record_count']}\n")
+              summary.write(f"- Rejected: {version['rejected_count']}\n")
+          PY
+
+      - name: Verify readiness, filters, and deployed CORS
+        if: inputs.operation == 'publish'
+        shell: bash
+        run: |
+          ready_status=""
+          for attempt in {1..20}; do
+            ready_status="$(curl --silent --show-error --max-time 20 \
+              --output "$RUNNER_TEMP/ready.json" \
+              --write-out '%{http_code}' \
+              "$API_BASE_URL/health/ready")"
+            if [[ "$ready_status" == "200" ]]; then
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$ready_status" != "200" ]]; then
+            cat "$RUNNER_TEMP/ready.json"
+            exit 1
+          fi
+          curl --silent --show-error --fail-with-body --max-time 20 \
+            --header "Origin: $WEB_ORIGIN" \
+            --dump-header "$RUNNER_TEMP/locations.headers" \
+            --output "$RUNNER_TEMP/locations.json" \
+            "$API_BASE_URL/api/v1/metadata/locations?limit=5"
+          curl --silent --show-error --fail-with-body --max-time 20 \
+            --header "Origin: $WEB_ORIGIN" \
+            --output "$RUNNER_TEMP/cuisines.json" \
+            "$API_BASE_URL/api/v1/metadata/cuisines?limit=5"
+          python - \
+            "$RUNNER_TEMP/ready.json" \
+            "$RUNNER_TEMP/locations.json" \
+            "$RUNNER_TEMP/cuisines.json" \
+            "$RUNNER_TEMP/locations.headers" <<'PY'
+          import json
+          import os
+          import sys
+
+          def read_json(path: str) -> dict[str, object]:
+              with open(path, encoding="utf-8") as handle:
+                  return json.load(handle)
+
+          ready = read_json(sys.argv[1])
+          locations = read_json(sys.argv[2])
+          cuisines = read_json(sys.argv[3])
+          with open(sys.argv[4], encoding="utf-8") as handle:
+              headers = handle.read().casefold()
+          if ready != {
+              "status": "ready",
+              "phase": 5,
+              "database": "available",
+              "redis": "available",
+              "activeDataset": True,
+              "llm": "configured",
+          }:
+              raise SystemExit(f"unexpected readiness payload: {ready}")
+          if not locations.get("values") or not cuisines.get("values"):
+              raise SystemExit("a deployed filter endpoint returned no values")
+          expected_origin = f"access-control-allow-origin: {os.environ['WEB_ORIGIN']}".casefold()
+          if expected_origin not in headers:
+              raise SystemExit("deployed metadata CORS origin does not match the frontend")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("\n## Live API verification\n\n")
+              summary.write("- Readiness: ready\n")
+              summary.write(f"- Location sample count: {len(locations['values'])}\n")
+              summary.write(f"- Cuisine sample count: {len(cuisines['values'])}\n")
+              summary.write("- Frontend CORS origin: allowed\n")
+          PY

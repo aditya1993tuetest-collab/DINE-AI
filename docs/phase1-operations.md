@@ -38,7 +38,21 @@ warnings, and gate failures. Dry runs do not write to PostgreSQL.
 
 ## Ingest the Pinned Source
 
+Production ingestion is normally run through the manual-only GitHub Actions workflow
+`.github/workflows/ingest-zomato.yml`. Configure `RENDER_DATABASE_URL` as an Actions secret, run
+`operation: validate`, review the quality and capacity reports, and only then explicitly run
+`operation: publish`. Pushes and pull requests cannot start this workflow.
+
+The equivalent operator commands are:
+
 ```powershell
+nextleap-data ingest `
+  --dataset ManikaSaini/zomato-restaurant-recommendation `
+  --revision 5738e9eda2fad49ad51c6e0ed26e761d9b947133 `
+  --filename zomato.csv `
+  --expected-sha256 4b0c91c37585310d509873dc399fdf739c7d222fcf7a693e4461b23d25a9d43d `
+  --dry-run
+
 nextleap-data ingest `
   --dataset ManikaSaini/zomato-restaurant-recommendation `
   --revision 5738e9eda2fad49ad51c6e0ed26e761d9b947133 `

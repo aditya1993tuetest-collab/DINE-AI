@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from restaurant_recommender.config import get_settings
+from restaurant_recommender.ingestion.capacity import CapacityReport
 from restaurant_recommender.ingestion.cli import main
 
 FIXTURE = Path(__file__).parents[3] / "docs" / "fixtures" / "restaurants_phase0.csv"
@@ -48,3 +49,82 @@ def test_hugging_face_cli_requires_revision(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(sys, "argv", ["nextleap-data", "ingest", "--dataset", "owner/name"])
     with pytest.raises(SystemExit, match="--revision is required"):
         main()
+
+
+def test_capacity_cli_outputs_safe_report(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    get_settings.cache_clear()
+    report = CapacityReport(10, 100, 20, 30, 40, 60, False, True)
+    monkeypatch.setattr(
+        "restaurant_recommender.ingestion.cli.check_postgres_capacity",
+        lambda *_args, **_kwargs: report,
+    )
+    monkeypatch.setattr(
+        "restaurant_recommender.ingestion.cli.build_engine", lambda *_args: object()
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "nextleap-data",
+            "capacity",
+            "--dataset",
+            "owner/name",
+            "--revision",
+            "abc123",
+            "--content-hash",
+            "f" * 64,
+            "--accepted-rows",
+            "10",
+            "--database-limit-bytes",
+            "100",
+            "--reserve-bytes",
+            "20",
+            "--estimated-bytes-per-record",
+            "3",
+        ],
+    )
+
+    main()
+
+    assert json.loads(capsys.readouterr().out)["safe_to_publish"] is True
+
+
+def test_capacity_cli_blocks_unsafe_publication(monkeypatch: pytest.MonkeyPatch) -> None:
+    get_settings.cache_clear()
+    report = CapacityReport(90, 100, 20, 30, 120, -20, False, False)
+    monkeypatch.setattr(
+        "restaurant_recommender.ingestion.cli.check_postgres_capacity",
+        lambda *_args, **_kwargs: report,
+    )
+    monkeypatch.setattr(
+        "restaurant_recommender.ingestion.cli.build_engine", lambda *_args: object()
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "nextleap-data",
+            "capacity",
+            "--dataset",
+            "owner/name",
+            "--revision",
+            "abc123",
+            "--content-hash",
+            "f" * 64,
+            "--accepted-rows",
+            "10",
+            "--database-limit-bytes",
+            "100",
+            "--reserve-bytes",
+            "20",
+            "--estimated-bytes-per-record",
+            "3",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as error:
+        main()
+
+    assert error.value.code == 3
